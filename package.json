@@ -7,8 +7,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "check": "node --check bin/merge-queue-readiness.mjs && node --test"
   },
+  "bin": { "merge-queue-readiness": "./bin/merge-queue-readiness.mjs" },
   "license": "MIT",
   "repository": {
     "type": "git",

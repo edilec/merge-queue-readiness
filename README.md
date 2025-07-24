@@ -1,25 +1,15 @@
 # Merge Queue Readiness
 
-Check merge queue readiness from checks, conflicts and branch freshness.
+An offline, read-only gate for an exported branch snapshot. It evaluates required checks on the current head, approvals, review threads, conflicts and capture age. It never contacts GitHub and cannot assert live queue position.
 
-- **Repository:** [edilec/merge-queue-readiness](https://github.com/edilec/merge-queue-readiness)
-- **Area:** Developer Productivity
-- **License:** MIT
+Requires Node.js 22 or later. No dependencies.
 
-## Scope
+```sh
+node bin/merge-queue-readiness.mjs --root examples --policy policy.json --snapshot ready.json --at 2026-01-01T00:30:00Z
+node bin/merge-queue-readiness.mjs --root examples --policy policy.json --snapshot blocked.json --at 2026-01-01T00:30:00Z
+npm run check
+```
 
-This repository is a focused Edilec engineering utility. Its implementation, tests, usage examples, release notes, and security guidance will be kept in this repository as the tool is built. It does not contain client work, production data, credentials, or copied source from another project.
+The first example exits 0; the second exits 1. Inputs are read relative to `--root` and resolved to real paths within it. Findings use `@policy` and `@snapshot` as logical source roles, with JSON pointers into the exact files named at invocation. No content or absolute path from either file is printed.
 
-## Repository layout
-
-- `src/` — implementation
-- `test/` — deterministic tests and fixtures
-- `docs/` — design notes, limits, and usage guidance
-
-## Development
-
-The first implementation should document its input contract, output contract, limits, failure behavior, and verification command before a release is made.
-
-## License
-
-MIT. See [LICENSE](./LICENSE).
+`--at` is an explicit UTC evaluation instant. Export the snapshot independently, as close to gate time as practical. See [rules and limits](docs/README.md) for the complete schema, exit codes and evidence limitations.
