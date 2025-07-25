@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { resolve, relative, isAbsolute } from 'node:path';
+import { TOOL_ID, evaluate } from '../src/index.mjs';
 
-const TOOL = 'merge-queue-readiness';
-const SEVERITY = Object.freeze({ 'input-unreadable': 'warning', 'input-invalid': 'warning', 'input-too-large': 'warning', 'capture-stale': 'warning', 'capture-future': 'warning', 'missing-evidence': 'warning', 'check-missing': 'error', 'check-wrong-commit': 'error', 'check-unsuccessful': 'error', 'approval-insufficient': 'error', 'approval-wrong-commit': 'error', 'changes-requested': 'error', 'review-unresolved': 'error', 'merge-conflict': 'error' });
-const INCOMPLETE = new Set(['input-unreadable', 'input-invalid', 'input-too-large', 'capture-stale', 'capture-future', 'missing-evidence']);
+const SEVERITY = Object.freeze({ 'input-unreadable': 'warning', 'input-invalid': 'warning', 'input-too-large': 'warning', 'capture-stale': 'warning', 'capture-future': 'warning', 'missing-evidence': 'warning', 'review-ambiguous': 'warning', 'check-missing': 'error', 'check-wrong-commit': 'error', 'check-unsuccessful': 'error', 'approval-insufficient': 'error', 'approval-wrong-commit': 'error', 'changes-requested': 'error', 'review-unresolved': 'error', 'merge-conflict': 'error' });
+const INCOMPLETE = new Set(['input-unreadable', 'input-invalid', 'input-too-large', 'capture-stale', 'capture-future', 'missing-evidence', 'review-ambiguous']);
 const clean = value => String(value).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, '').slice(0, 120);
 const byCode = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const sha = value => typeof value === 'string' && /^[a-fA-F0-9]{40}$/.test(value);
@@ -37,7 +37,7 @@ function finding(ruleId, file, pointer, message) {
 function report(findings, checked) {
   findings.sort((a, b) => byCode(a.location.file, b.location.file) || byCode(a.location.pointer, b.location.pointer) || byCode(a.ruleId, b.ruleId));
   const status = findings.some(f => INCOMPLETE.has(f.ruleId)) ? 'incomplete' : findings.some(f => f.severity === 'error') ? 'fail' : 'pass';
-  return { schemaVersion: '1', tool: TOOL, status, summary: { checked, errors: findings.filter(f => f.severity === 'error').length, warnings: findings.filter(f => f.severity === 'warning').length }, findings };
+  return { schemaVersion: '1', tool: TOOL_ID, status, summary: { checked, errors: findings.filter(f => f.severity === 'error').length, warnings: findings.filter(f => f.severity === 'warning').length }, findings };
 }
 
 function readJson(root, name, role) {
@@ -60,7 +60,7 @@ function validPolicy(p) {
   return keys(p, ['requiredChecks', 'minApprovals', 'maxAgeMinutes']) && Array.isArray(p.requiredChecks) && p.requiredChecks.length > 0 && p.requiredChecks.length <= 100 && p.requiredChecks.every(x => typeof x === 'string' && /^[A-Za-z0-9_. /-]{1,80}$/.test(x)) && new Set(p.requiredChecks).size === p.requiredChecks.length && Number.isInteger(p.minApprovals) && p.minApprovals >= 0 && p.minApprovals <= 100 && Number.isInteger(p.maxAgeMinutes) && p.maxAgeMinutes >= 1 && p.maxAgeMinutes <= 10080;
 }
 function validSnapshot(s) {
-  return keys(s, ['headSha', 'capturedAt', 'mergeable', 'unresolvedThreads', 'checks', 'approvals']) && sha(s.headSha) && instant(s.capturedAt) && typeof s.mergeable === 'boolean' && Number.isInteger(s.unresolvedThreads) && s.unresolvedThreads >= 0 && s.unresolvedThreads <= 10000 && Array.isArray(s.checks) && s.checks.length <= 1000 && s.checks.every(c => keys(c, ['name', 'sha', 'status']) && typeof c.name === 'string' && /^[A-Za-z0-9_. /-]{1,80}$/.test(c.name) && sha(c.sha) && ['success', 'failure', 'pending', 'cancelled'].includes(c.status)) && Array.isArray(s.approvals) && s.approvals.length <= 1000 && s.approvals.every(a => keys(a, ['reviewer', 'sha', 'state']) && typeof a.reviewer === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(a.reviewer) && sha(a.sha) && ['approved', 'changes-requested', 'dismissed'].includes(a.state));
+  return keys(s, ['headSha', 'capturedAt', 'mergeable', 'unresolvedThreads', 'checksComplete', 'reviewsComplete', 'checks', 'approvals']) && sha(s.headSha) && instant(s.capturedAt) && typeof s.mergeable === 'boolean' && typeof s.checksComplete === 'boolean' && typeof s.reviewsComplete === 'boolean' && Number.isInteger(s.unresolvedThreads) && s.unresolvedThreads >= 0 && s.unresolvedThreads <= 10000 && Array.isArray(s.checks) && s.checks.length <= 1000 && s.checks.every(c => keys(c, ['name', 'sha', 'status']) && typeof c.name === 'string' && /^[A-Za-z0-9_. /-]{1,80}$/.test(c.name) && sha(c.sha) && ['success', 'failure', 'pending', 'cancelled'].includes(c.status)) && Array.isArray(s.approvals) && s.approvals.length <= 1000 && s.approvals.every(a => keys(a, ['reviewer', 'sha', 'state']) && typeof a.reviewer === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(a.reviewer) && sha(a.sha) && ['approved', 'changes-requested', 'dismissed'].includes(a.state));
 }
 
 function main(argv) {
@@ -78,31 +78,9 @@ function main(argv) {
   if (!snapshot.error && !validSnapshot(snapshot.value)) findings.push(finding('input-invalid', '@snapshot', '', 'Snapshot schema is invalid or bounded limits were exceeded'));
   let checked = 0;
   if (findings.length === 0) {
-    const p = policy.value, s = snapshot.value;
-    const age = Date.parse(opt['--at']) - Date.parse(s.capturedAt);
-    if (age < 0) findings.push(finding('capture-future', '@snapshot', '/capturedAt', 'Capture is later than the evaluation time'));
-    else if (age > p.maxAgeMinutes * 60000) findings.push(finding('capture-stale', '@snapshot', '/capturedAt', 'Capture exceeds policy maximum age'));
-    checked++;
-    if (!s.mergeable) findings.push(finding('merge-conflict', '@snapshot', '/mergeable', 'Branch is not mergeable'));
-    checked++;
-    if (s.unresolvedThreads > 0) findings.push(finding('review-unresolved', '@snapshot', '/unresolvedThreads', 'Review threads remain unresolved'));
-    for (const name of p.requiredChecks) {
-      checked++;
-      const matching = s.checks.filter(c => c.name === name);
-      const pointer = `/checks/${p.requiredChecks.indexOf(name)}`;
-      if (!matching.length) findings.push(finding('check-missing', '@snapshot', pointer, `Required check ${clean(name)} is absent`));
-      else if (!matching.some(c => c.sha === s.headSha)) findings.push(finding('check-wrong-commit', '@snapshot', pointer, `Required check ${clean(name)} has no result for the head commit`));
-      else if (!matching.some(c => c.sha === s.headSha && c.status === 'success')) findings.push(finding('check-unsuccessful', '@snapshot', pointer, `Required check ${clean(name)} has no successful head result`));
-      if (matching.filter(c => c.sha === s.headSha).length > 1) findings.push(finding('missing-evidence', '@snapshot', pointer, `Required check ${clean(name)} has ambiguous head results`));
-    }
-    checked++;
-    const headApprovals = new Set(s.approvals.filter(a => a.sha === s.headSha && a.state === 'approved').map(a => a.reviewer));
-    if (headApprovals.size < p.minApprovals) {
-      const wrong = s.approvals.some(a => a.state === 'approved' && a.sha !== s.headSha);
-      findings.push(finding(wrong ? 'approval-wrong-commit' : 'approval-insufficient', '@snapshot', '/approvals', 'Current commit has too few approvals'));
-    }
-    if (s.approvals.some(a => a.sha === s.headSha && a.state === 'changes-requested')) findings.push(finding('changes-requested', '@snapshot', '/approvals', 'Current commit has a changes-requested review'));
-    if (checked === 0) findings.push(finding('missing-evidence', '@snapshot', '', 'No evidence was evaluated'));
+    const result = evaluate(policy.value, snapshot.value, opt['--at']);
+    checked = result.checked;
+    for (const row of result.observations) findings.push(finding(row.ruleId, '@snapshot', row.pointer, clean(row.message)));
   }
   const out = report(findings, checked);
   process.stdout.write(`${JSON.stringify(out)}\n`);

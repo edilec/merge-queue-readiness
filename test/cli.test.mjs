@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 const cli = new URL('../bin/merge-queue-readiness.mjs', import.meta.url);
 const goodPolicy = { requiredChecks: ['build'], minApprovals: 1, maxAgeMinutes: 60 };
-const goodSnapshot = { headSha: 'a'.repeat(40), capturedAt: '2026-01-01T00:00:00Z', mergeable: true, unresolvedThreads: 0, checks: [{ name: 'build', sha: 'a'.repeat(40), status: 'success' }], approvals: [{ reviewer: 'reviewer-1', sha: 'a'.repeat(40), state: 'approved' }] };
+const goodSnapshot = { headSha: 'a'.repeat(40), capturedAt: '2026-01-01T00:00:00Z', mergeable: true, unresolvedThreads: 0, checksComplete: true, reviewsComplete: true, checks: [{ name: 'build', sha: 'a'.repeat(40), status: 'success' }], approvals: [{ reviewer: 'reviewer-1', sha: 'a'.repeat(40), state: 'approved' }] };
 
 function run(policy = goodPolicy, snapshot = goodSnapshot, more = [], at = '2026-01-01T00:30:00Z') {
   const root = mkdtempSync(join(tmpdir(), 'queue-test-'));
@@ -54,10 +54,32 @@ test('stale capture is incomplete, never ready', () => {
 
 test('a current changes-requested review blocks readiness', () => {
   const snapshot = structuredClone(goodSnapshot);
-  snapshot.approvals.push({ reviewer: 'reviewer-2', sha: snapshot.headSha, state: 'changes-requested' });
+  snapshot.approvals = [{ reviewer: 'reviewer-2', sha: snapshot.headSha, state: 'changes-requested' }];
   const result = run(goodPolicy, snapshot);
   assert.equal(result.status, 1);
   assert.ok(result.report.findings.some(f => f.ruleId === 'changes-requested'));
+});
+
+test('conflicting states for one reviewer are unknown without ordering', () => {
+  const snapshot = structuredClone(goodSnapshot);
+  snapshot.approvals.push({ reviewer: 'reviewer-1', sha: snapshot.headSha, state: 'changes-requested' });
+  const r = run(goodPolicy, snapshot);
+  assert.equal(r.status, 2);
+  assert.equal(r.report.status, 'incomplete');
+  assert.ok(r.report.findings.some(f => f.ruleId === 'review-ambiguous'));
+});
+
+test('partial check and review exports are incomplete, not blockers', () => {
+  const snapshot = structuredClone(goodSnapshot);
+  snapshot.checks = [];
+  snapshot.approvals = [];
+  snapshot.checksComplete = false;
+  snapshot.reviewsComplete = false;
+  const r = run(goodPolicy, snapshot);
+  assert.equal(r.status, 2);
+  assert.equal(r.report.status, 'incomplete');
+  assert.ok(r.report.findings.some(f => f.ruleId === 'missing-evidence'));
+  assert.ok(!r.report.findings.some(f => f.ruleId === 'check-missing' || f.ruleId === 'approval-insufficient'));
 });
 
 test('records bound is complete at N and incomplete at N plus one', () => {
