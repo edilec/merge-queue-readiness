@@ -36,6 +36,20 @@ test('a successful check on another commit blocks readiness', () => {
   assert.ok(result.report.findings.some(f => f.ruleId === 'check-wrong-commit'));
 });
 
+test('check finding points to the matching snapshot record, not policy index', () => {
+  const policy = { ...goodPolicy, requiredChecks: ['lint', 'build'] };
+  const snapshot = structuredClone(goodSnapshot);
+  snapshot.checks = [
+    { name: 'build', sha: 'b'.repeat(40), status: 'success' },
+    { name: 'lint', sha: snapshot.headSha, status: 'success' }
+  ];
+  const r = run(policy, snapshot);
+  assert.equal(r.status, 1);
+  const wrong = r.report.findings.find(f => f.ruleId === 'check-wrong-commit');
+  assert.equal(wrong.location.file, '@snapshot');
+  assert.equal(wrong.location.pointer, '/checks/0');
+});
+
 test('unresolved thread and conflict each block readiness', () => {
   for (const change of [{ unresolvedThreads: 1 }, { mergeable: false }]) {
     const result = run(goodPolicy, { ...goodSnapshot, ...change });
@@ -91,6 +105,21 @@ test('records bound is complete at N and incomplete at N plus one', () => {
   const result = run(goodPolicy, snapshot);
   assert.equal(result.status, 2);
   assert.ok(result.report.findings.some(f => f.ruleId === 'input-invalid'));
+});
+
+test('input byte bound is quiet at 262144 and incomplete at 262145', () => {
+  const root = mkdtempSync(join(tmpdir(), 'queue-test-'));
+  try {
+    const base = JSON.stringify(goodPolicy);
+    writeFileSync(join(root, 'policy.json'), base + ' '.repeat(262144 - Buffer.byteLength(base)));
+    writeFileSync(join(root, 'snapshot.json'), JSON.stringify(goodSnapshot));
+    const invoke = () => spawnSync(process.execPath, [cli.pathname, '--root', root, '--policy', 'policy.json', '--snapshot', 'snapshot.json', '--at', '2026-01-01T00:30:00Z'], { encoding: 'utf8' });
+    assert.equal(invoke().status, 0);
+    writeFileSync(join(root, 'policy.json'), base + ' '.repeat(262145 - Buffer.byteLength(base)));
+    const over = invoke();
+    assert.equal(over.status, 2);
+    assert.ok(JSON.parse(over.stdout).findings.some(f => f.ruleId === 'input-too-large'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('symlink escaping root is refused without exposing target', () => {

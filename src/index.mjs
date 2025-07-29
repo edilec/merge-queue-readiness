@@ -12,15 +12,16 @@ export function evaluate(policy, snapshot, at) {
   checked++;
   if (snapshot.unresolvedThreads > 0) add('review-unresolved', '/unresolvedThreads', 'Review threads remain unresolved');
   if (!snapshot.checksComplete) add('missing-evidence', '/checksComplete', 'Check export is not complete');
-  for (const [index, name] of policy.requiredChecks.entries()) {
+  for (const name of policy.requiredChecks) {
     checked++;
     if (!snapshot.checksComplete) continue;
     const matching = snapshot.checks.filter(c => c.name === name);
-    const pointer = `/checks/${index}`;
-    if (!matching.length) add('check-missing', pointer, `Required check ${name} is absent`);
-    else if (!matching.some(c => c.sha === snapshot.headSha)) add('check-wrong-commit', pointer, `Required check ${name} has no result for the head commit`);
-    else if (!matching.some(c => c.sha === snapshot.headSha && c.status === 'success')) add('check-unsuccessful', pointer, `Required check ${name} has no successful head result`);
-    if (matching.filter(c => c.sha === snapshot.headSha).length > 1) add('missing-evidence', pointer, `Required check ${name} has ambiguous head results`);
+    const first = snapshot.checks.findIndex(c => c.name === name);
+    const head = snapshot.checks.findIndex(c => c.name === name && c.sha === snapshot.headSha);
+    if (!matching.length) add('check-missing', '/checks', `Required check ${name} is absent`);
+    else if (head === -1) add('check-wrong-commit', `/checks/${first}`, `Required check ${name} has no result for the head commit`);
+    else if (!matching.some(c => c.sha === snapshot.headSha && c.status === 'success')) add('check-unsuccessful', `/checks/${head}`, `Required check ${name} has no successful head result`);
+    if (matching.filter(c => c.sha === snapshot.headSha).length > 1) add('missing-evidence', '/checks', `Required check ${name} has ambiguous head results`);
   }
   checked++;
   if (!snapshot.reviewsComplete) add('missing-evidence', '/reviewsComplete', 'Review export is not complete');

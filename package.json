@@ -1,6 +1,6 @@
 {
   "name": "merge-queue-readiness",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Check merge queue readiness from checks, conflicts and branch freshness.",
   "type": "module",
   "engines": {

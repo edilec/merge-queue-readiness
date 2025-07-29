@@ -49,7 +49,9 @@ function readJson(root, name, role) {
     const stat = statSync(path);
     if (!stat.isFile()) throw Error();
     if (stat.size > 262144) return { error: finding('input-too-large', role, '', 'Input exceeds 262144 bytes') };
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(path));
+    const bytes = readFileSync(path);
+    if (bytes.length > 262144) return { error: finding('input-too-large', role, '', 'Input exceeds 262144 bytes') };
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     return { value: JSON.parse(text) };
   } catch {
     return { error: finding('input-unreadable', role, '', 'Input could not be read, decoded or parsed') };
