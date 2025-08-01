@@ -1,9 +1,12 @@
 export const TOOL_ID = 'merge-queue-readiness';
 
-export function evaluate(policy, snapshot, at) {
+export function evaluate(policy, snapshot, at, deadline = Infinity, now = () => Date.now()) {
   const observations = [];
   const add = (ruleId, pointer, message) => observations.push({ ruleId, pointer, message });
   let checked = 0;
+  const expired = () => deadline !== Infinity && now() > deadline;
+  const timeout = () => ({ checked, observations: [{ ruleId: 'timeout', pointer: '', message: 'Evaluation exceeded 5000 milliseconds' }] });
+  if (expired()) return timeout();
   const age = Date.parse(at) - Date.parse(snapshot.capturedAt);
   if (age < 0) add('capture-future', '/capturedAt', 'Capture is later than the evaluation time');
   else if (age > policy.maxAgeMinutes * 60000) add('capture-stale', '/capturedAt', 'Capture exceeds policy maximum age');
@@ -13,6 +16,7 @@ export function evaluate(policy, snapshot, at) {
   if (snapshot.unresolvedThreads > 0) add('review-unresolved', '/unresolvedThreads', 'Review threads remain unresolved');
   if (!snapshot.checksComplete) add('missing-evidence', '/checksComplete', 'Check export is not complete');
   for (const name of policy.requiredChecks) {
+    if (expired()) return timeout();
     checked++;
     if (!snapshot.checksComplete) continue;
     const matching = snapshot.checks.filter(c => c.name === name);
@@ -38,5 +42,6 @@ export function evaluate(policy, snapshot, at) {
       if (headReviews.some(a => a.state === 'changes-requested')) add('changes-requested', '/approvals', 'Current commit has a changes-requested review');
     }
   }
+  if (expired()) return timeout();
   return { checked, observations };
 }

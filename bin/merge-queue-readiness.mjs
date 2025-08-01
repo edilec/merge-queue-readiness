@@ -3,8 +3,10 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { TOOL_ID, evaluate } from '../src/index.mjs';
 
-const SEVERITY = Object.freeze({ 'input-unreadable': 'warning', 'input-invalid': 'warning', 'input-too-large': 'warning', 'capture-stale': 'warning', 'capture-future': 'warning', 'missing-evidence': 'warning', 'review-ambiguous': 'warning', 'check-missing': 'error', 'check-wrong-commit': 'error', 'check-unsuccessful': 'error', 'approval-insufficient': 'error', 'approval-wrong-commit': 'error', 'changes-requested': 'error', 'review-unresolved': 'error', 'merge-conflict': 'error' });
-const INCOMPLETE = new Set(['input-unreadable', 'input-invalid', 'input-too-large', 'capture-stale', 'capture-future', 'missing-evidence', 'review-ambiguous']);
+const SEVERITY = Object.freeze({ 'input-unreadable': 'warning', 'input-invalid': 'warning', 'input-too-large': 'warning', 'input-depth-limit': 'warning', 'timeout': 'warning', 'capture-stale': 'warning', 'capture-future': 'warning', 'missing-evidence': 'warning', 'review-ambiguous': 'warning', 'check-missing': 'error', 'check-wrong-commit': 'error', 'check-unsuccessful': 'error', 'approval-insufficient': 'error', 'approval-wrong-commit': 'error', 'changes-requested': 'error', 'review-unresolved': 'error', 'merge-conflict': 'error' });
+const INCOMPLETE = new Set(['input-unreadable', 'input-invalid', 'input-too-large', 'input-depth-limit', 'timeout', 'capture-stale', 'capture-future', 'missing-evidence', 'review-ambiguous']);
+const MAX_DEPTH = 2;
+const DEADLINE_MS = 5000;
 const clean = value => String(value).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, '').slice(0, 120);
 const byCode = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const sha = value => typeof value === 'string' && /^[a-fA-F0-9]{40}$/.test(value);
@@ -40,9 +42,10 @@ function report(findings, checked) {
   return { schemaVersion: '1', tool: TOOL_ID, status, summary: { checked, errors: findings.filter(f => f.severity === 'error').length, warnings: findings.filter(f => f.severity === 'warning').length }, findings };
 }
 
-function readJson(root, name, role) {
+function readJson(root, name, role, deadline) {
   let path;
   try {
+    if (Date.now() > deadline) return { error: finding('timeout', role, '', 'Evaluation exceeded 5000 milliseconds') };
     path = realpathSync(resolve(root, name));
     const rel = relative(root, path);
     if (rel === '..' || rel.startsWith(`..${String.fromCharCode(47)}`) || isAbsolute(rel)) throw Error();
@@ -52,7 +55,15 @@ function readJson(root, name, role) {
     const bytes = readFileSync(path);
     if (bytes.length > 262144) return { error: finding('input-too-large', role, '', 'Input exceeds 262144 bytes') };
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    return { value: JSON.parse(text) };
+    const value = JSON.parse(text);
+    const stack = [[value, 0]];
+    while (stack.length) {
+      if (Date.now() > deadline) return { error: finding('timeout', role, '', 'Evaluation exceeded 5000 milliseconds') };
+      const [node, depth] = stack.pop();
+      if (depth > MAX_DEPTH) return { error: finding('input-depth-limit', role, '', 'JSON nesting exceeds depth two') };
+      if (node !== null && typeof node === 'object') for (const child of Object.values(node)) if (child !== null && typeof child === 'object') stack.push([child, depth + 1]);
+    }
+    return { value };
   } catch {
     return { error: finding('input-unreadable', role, '', 'Input could not be read, decoded or parsed') };
   }
@@ -72,15 +83,16 @@ function main(argv) {
   let root;
   try { root = realpathSync(opt['--root']); if (!statSync(root).isDirectory()) throw Error(); }
   catch { process.stderr.write('Root must be a readable directory\n'); return 2; }
+  const deadline = Date.now() + DEADLINE_MS;
   const findings = [];
-  const policy = readJson(root, opt['--policy'], '@policy');
-  const snapshot = readJson(root, opt['--snapshot'], '@snapshot');
+  const policy = readJson(root, opt['--policy'], '@policy', deadline);
+  const snapshot = readJson(root, opt['--snapshot'], '@snapshot', deadline);
   for (const input of [policy, snapshot]) if (input.error) findings.push(input.error);
   if (!policy.error && !validPolicy(policy.value)) findings.push(finding('input-invalid', '@policy', '', 'Policy schema is invalid or bounded limits were exceeded'));
   if (!snapshot.error && !validSnapshot(snapshot.value)) findings.push(finding('input-invalid', '@snapshot', '', 'Snapshot schema is invalid or bounded limits were exceeded'));
   let checked = 0;
   if (findings.length === 0) {
-    const result = evaluate(policy.value, snapshot.value, opt['--at']);
+    const result = evaluate(policy.value, snapshot.value, opt['--at'], deadline);
     checked = result.checked;
     for (const row of result.observations) findings.push(finding(row.ruleId, '@snapshot', row.pointer, clean(row.message)));
   }

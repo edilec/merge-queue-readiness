@@ -122,6 +122,15 @@ test('input byte bound is quiet at 262144 and incomplete at 262145', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('schema depth two is accepted and depth three is incomplete', () => {
+  assert.equal(run().status, 0);
+  const snapshot = structuredClone(goodSnapshot);
+  snapshot.checks[0].extra = {};
+  const over = run(goodPolicy, snapshot);
+  assert.equal(over.status, 2);
+  assert.ok(over.report.findings.some(f => f.ruleId === 'input-depth-limit'));
+});
+
 test('symlink escaping root is refused without exposing target', () => {
   const root = mkdtempSync(join(tmpdir(), 'queue-test-'));
   const outside = mkdtempSync(join(tmpdir(), 'queue-outside-'));
