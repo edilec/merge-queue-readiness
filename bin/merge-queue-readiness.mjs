@@ -94,7 +94,7 @@ function main(argv) {
   if (findings.length === 0) {
     const result = evaluate(policy.value, snapshot.value, opt['--at'], deadline);
     checked = result.checked;
-    for (const row of result.observations) findings.push(finding(row.ruleId, '@snapshot', row.pointer, clean(row.message)));
+    for (const row of result.observations) findings.push(finding(row.ruleId, row.file ?? '@snapshot', row.pointer, clean(row.message)));
   }
   const out = report(findings, checked);
   process.stdout.write(`${JSON.stringify(out)}\n`);

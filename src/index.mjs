@@ -2,7 +2,7 @@ export const TOOL_ID = 'merge-queue-readiness';
 
 export function evaluate(policy, snapshot, at, deadline = Infinity, now = () => Date.now()) {
   const observations = [];
-  const add = (ruleId, pointer, message) => observations.push({ ruleId, pointer, message });
+  const add = (ruleId, pointer, message, file = '@snapshot') => observations.push({ ruleId, pointer, message, file });
   let checked = 0;
   const expired = () => deadline !== Infinity && now() > deadline;
   const timeout = () => ({ checked, observations: [{ ruleId: 'timeout', pointer: '', message: 'Evaluation exceeded 5000 milliseconds' }] });
@@ -15,17 +15,17 @@ export function evaluate(policy, snapshot, at, deadline = Infinity, now = () => 
   checked++;
   if (snapshot.unresolvedThreads > 0) add('review-unresolved', '/unresolvedThreads', 'Review threads remain unresolved');
   if (!snapshot.checksComplete) add('missing-evidence', '/checksComplete', 'Check export is not complete');
-  for (const name of policy.requiredChecks) {
+  for (const [index, name] of policy.requiredChecks.entries()) {
     if (expired()) return timeout();
     checked++;
     if (!snapshot.checksComplete) continue;
     const matching = snapshot.checks.filter(c => c.name === name);
     const first = snapshot.checks.findIndex(c => c.name === name);
     const head = snapshot.checks.findIndex(c => c.name === name && c.sha === snapshot.headSha);
-    if (!matching.length) add('check-missing', '/checks', `Required check ${name} is absent`);
-    else if (head === -1) add('check-wrong-commit', `/checks/${first}`, `Required check ${name} has no result for the head commit`);
-    else if (!matching.some(c => c.sha === snapshot.headSha && c.status === 'success')) add('check-unsuccessful', `/checks/${head}`, `Required check ${name} has no successful head result`);
-    if (matching.filter(c => c.sha === snapshot.headSha).length > 1) add('missing-evidence', '/checks', `Required check ${name} has ambiguous head results`);
+    if (!matching.length) add('check-missing', `/requiredChecks/${index}`, 'A required check is absent', '@policy');
+    else if (head === -1) add('check-wrong-commit', `/checks/${first}`, 'A required check has no result for the head commit');
+    else if (!matching.some(c => c.sha === snapshot.headSha && c.status === 'success')) add('check-unsuccessful', `/checks/${head}`, 'A required check has no successful head result');
+    if (matching.filter(c => c.sha === snapshot.headSha).length > 1) add('missing-evidence', '/checks', 'A required check has ambiguous head results');
   }
   checked++;
   if (!snapshot.reviewsComplete) add('missing-evidence', '/reviewsComplete', 'Review export is not complete');

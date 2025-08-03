@@ -36,6 +36,15 @@ test('a successful check on another commit blocks readiness', () => {
   assert.ok(result.report.findings.some(f => f.ruleId === 'check-wrong-commit'));
 });
 
+test('private required check name is not echoed in blocker output', () => {
+  const policy = { ...goodPolicy, requiredChecks: ['private-check'] };
+  const snapshot = structuredClone(goodSnapshot);
+  const r = run(policy, snapshot);
+  assert.equal(r.status, 1);
+  assert.ok(r.report.findings.some(f => f.ruleId === 'check-missing' && f.location.file === '@policy' && f.location.pointer === '/requiredChecks/0'));
+  assert.ok(!`${r.stdout}${r.stderr}`.includes('private-check'));
+});
+
 test('check finding points to the matching snapshot record, not policy index', () => {
   const policy = { ...goodPolicy, requiredChecks: ['lint', 'build'] };
   const snapshot = structuredClone(goodSnapshot);
