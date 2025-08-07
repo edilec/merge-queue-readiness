@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check bin/merge-queue-readiness.mjs && node --test"
+    "lint": "node --check bin/merge-queue-readiness.mjs && node --check src/index.mjs",
+    "check": "npm run lint && npm test"
   },
   "bin": { "merge-queue-readiness": "./bin/merge-queue-readiness.mjs" },
   "license": "MIT",
