@@ -42,10 +42,10 @@ function report(findings, checked) {
   return { schemaVersion: '1', tool: TOOL_ID, status, summary: { checked, errors: findings.filter(f => f.severity === 'error').length, warnings: findings.filter(f => f.severity === 'warning').length }, findings };
 }
 
-function readJson(root, name, role, deadline) {
+function readJson(root, name, role, deadline, now) {
   let path;
   try {
-    if (Date.now() > deadline) return { error: finding('timeout', role, '', 'Evaluation exceeded 5000 milliseconds') };
+    if (now() > deadline) return { error: finding('timeout', role, '', 'Evaluation exceeded 5000 milliseconds') };
     path = realpathSync(resolve(root, name));
     const rel = relative(root, path);
     if (rel === '..' || rel.startsWith(`..${String.fromCharCode(47)}`) || isAbsolute(rel)) throw Error();
@@ -58,7 +58,7 @@ function readJson(root, name, role, deadline) {
     const value = JSON.parse(text);
     const stack = [[value, 0]];
     while (stack.length) {
-      if (Date.now() > deadline) return { error: finding('timeout', role, '', 'Evaluation exceeded 5000 milliseconds') };
+      if (now() > deadline) return { error: finding('timeout', role, '', 'Evaluation exceeded 5000 milliseconds') };
       const [node, depth] = stack.pop();
       if (depth > MAX_DEPTH) return { error: finding('input-depth-limit', role, '', 'JSON nesting exceeds depth two') };
       if (node !== null && typeof node === 'object') for (const child of Object.values(node)) if (child !== null && typeof child === 'object') stack.push([child, depth + 1]);
@@ -76,23 +76,23 @@ function validSnapshot(s) {
   return keys(s, ['headSha', 'capturedAt', 'mergeable', 'unresolvedThreads', 'checksComplete', 'reviewsComplete', 'checks', 'approvals']) && sha(s.headSha) && instant(s.capturedAt) && typeof s.mergeable === 'boolean' && typeof s.checksComplete === 'boolean' && typeof s.reviewsComplete === 'boolean' && Number.isInteger(s.unresolvedThreads) && s.unresolvedThreads >= 0 && s.unresolvedThreads <= 10000 && Array.isArray(s.checks) && s.checks.length <= 1000 && s.checks.every(c => keys(c, ['name', 'sha', 'status']) && typeof c.name === 'string' && /^[A-Za-z0-9_. /-]{1,80}$/.test(c.name) && sha(c.sha) && ['success', 'failure', 'pending', 'cancelled'].includes(c.status)) && Array.isArray(s.approvals) && s.approvals.length <= 1000 && s.approvals.every(a => keys(a, ['reviewer', 'sha', 'state']) && typeof a.reviewer === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(a.reviewer) && sha(a.sha) && ['approved', 'changes-requested', 'dismissed'].includes(a.state));
 }
 
-function main(argv) {
+function main(argv, now = Date.now) {
   let opt;
   try { opt = args(argv); } catch (e) { process.stderr.write(`${clean(e.message)}\n`); return 2; }
   if (opt.help) { process.stdout.write(`${usage()}\n`); return 0; }
   let root;
   try { root = realpathSync(opt['--root']); if (!statSync(root).isDirectory()) throw Error(); }
   catch { process.stderr.write('Root must be a readable directory\n'); return 2; }
-  const deadline = Date.now() + DEADLINE_MS;
+  const deadline = now() + DEADLINE_MS;
   const findings = [];
-  const policy = readJson(root, opt['--policy'], '@policy', deadline);
-  const snapshot = readJson(root, opt['--snapshot'], '@snapshot', deadline);
+  const policy = readJson(root, opt['--policy'], '@policy', deadline, now);
+  const snapshot = readJson(root, opt['--snapshot'], '@snapshot', deadline, now);
   for (const input of [policy, snapshot]) if (input.error) findings.push(input.error);
   if (!policy.error && !validPolicy(policy.value)) findings.push(finding('input-invalid', '@policy', '', 'Policy schema is invalid or bounded limits were exceeded'));
   if (!snapshot.error && !validSnapshot(snapshot.value)) findings.push(finding('input-invalid', '@snapshot', '', 'Snapshot schema is invalid or bounded limits were exceeded'));
   let checked = 0;
   if (findings.length === 0) {
-    const result = evaluate(policy.value, snapshot.value, opt['--at'], deadline);
+    const result = evaluate(policy.value, snapshot.value, opt['--at'], deadline, now);
     checked = result.checked;
     for (const row of result.observations) findings.push(finding(row.ruleId, row.file ?? '@snapshot', row.pointer, clean(row.message)));
   }

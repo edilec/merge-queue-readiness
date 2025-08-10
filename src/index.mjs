@@ -1,6 +1,6 @@
 export const TOOL_ID = 'merge-queue-readiness';
 
-export function evaluate(policy, snapshot, at, deadline = Infinity, now = () => Date.now()) {
+export function evaluate(policy, snapshot, at, deadline = Infinity, now = Date.now) {
   const observations = [];
   const add = (ruleId, pointer, message, file = '@snapshot') => observations.push({ ruleId, pointer, message, file });
   let checked = 0;
