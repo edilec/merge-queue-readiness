@@ -1,0 +1,20 @@
+{
+  "name": "merge-queue-readiness",
+  "version": "1.0.0",
+  "description": "Check merge queue readiness from checks, conflicts and branch freshness.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "lint": "node --check bin/merge-queue-readiness.mjs && node --check src/index.mjs",
+    "check": "npm run lint && npm test"
+  },
+  "bin": { "merge-queue-readiness": "./bin/merge-queue-readiness.mjs" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/edilec/merge-queue-readiness"
+  }
+}

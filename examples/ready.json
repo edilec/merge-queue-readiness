@@ -1,0 +1,1 @@
+{"headSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","capturedAt":"2026-01-01T00:00:00Z","mergeable":true,"unresolvedThreads":0,"checksComplete":true,"reviewsComplete":true,"checks":[{"name":"build","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"success"}],"approvals":[{"reviewer":"reviewer-1","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"approved"}]}
